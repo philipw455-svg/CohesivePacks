@@ -1,0 +1,11 @@
+# Private keys and tokens. Never commit these.
+.env
+tokens.json
+
+# Your photos and program output.
+inbox/
+output/
+
+__pycache__/
+*.pyc
+.venv/

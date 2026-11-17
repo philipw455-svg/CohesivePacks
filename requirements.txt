@@ -1,0 +1,6 @@
+anthropic
+requests
+pillow
+pillow-heif
+numpy
+python-dotenv
