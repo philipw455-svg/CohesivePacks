@@ -125,6 +125,65 @@ class ListingTests(unittest.TestCase):
         self.assertEqual(offer["pricingSummary"]["auctionStartPrice"]["value"], "0.99")
 
 
+class GradedAndFloorTests(unittest.TestCase):
+    def test_graded_psa_card(self):
+        row = {k: str(v) for k, v in CARD_JSON.items()}
+        row.update(graded="yes", grader="PSA", grade="Mint 9", cert_number="52455911",
+                   sku="CP-1", title="t")
+        item = listing.inventory_item(row, ["u"], "")
+        self.assertEqual(item["condition"], "LIKE_NEW")
+        names = {d["name"]: d for d in item["conditionDescriptors"]}
+        self.assertEqual(names["27501"]["values"], ["275010"])
+        self.assertEqual(names["27502"]["values"], ["275022"])
+        self.assertEqual(names["27503"]["additionalInfo"], "52455911")
+        self.assertEqual(item["product"]["aspects"]["Grade"], ["Mint 9"])
+
+    def test_cgc_authentic_and_bad_grader(self):
+        row = {"graded": "yes", "grader": "CGC", "grade": "Authentic"}
+        self.assertEqual(listing.condition_fields(row)["conditionDescriptors"][1]["values"],
+                         ["2750219"])
+        self.assertTrue(listing.graded_problem({"graded": "yes", "grader": "XYZ", "grade": "9"}))
+
+    def test_floor_start_price_keeps_store_cash(self):
+        for cash in (0.05, 2.0, 12.5, 100.0):
+            start = pricing.floor_start_price(cash)
+            self.assertGreaterEqual(start, 0.99)
+            if start > 0.99:
+                self.assertGreaterEqual(pricing.net_after_fees(start), cash)
+                self.assertLess(pricing.net_after_fees(start - 0.02), cash)
+
+
+class ImportTests(unittest.TestCase):
+    def test_imports_card_list_with_any_photo_ending(self):
+        from cardlister import cli, config
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            inbox = d / "inbox" / "phone"
+            inbox.mkdir(parents=True)
+            make_photo(inbox / "IMG_1.JPG", "red", time.time())
+            make_photo(inbox / "IMG_2.jpeg", "blue", time.time())
+            card_list = d / "cards.csv"
+            row = {k: str(v) for k, v in CARD_JSON.items()}
+            row.update(front_name="IMG_1", back_name="IMG_2", start_price="8.54",
+                       title="2023 Prizm Stroud RC", graded="", store_cash_estimate="7.00")
+            review.write_rows(card_list, [row])
+            orig = config.load_settings
+
+            def patched():
+                s = orig()
+                s.inbox_dir, s.output_dir, s.photoroom_api_key = d / "inbox", d / "out", ""
+                return s
+
+            with mock.patch.object(cli, "load_settings", patched):
+                cli.main(["import", str(card_list)])
+                cli.main(["import", str(card_list)])  # A second run adds nothing.
+            rows = review.read_rows(d / "out" / "review.csv")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual((rows[0]["status"], rows[0]["start_price"]), ("ready", "8.54"))
+            self.assertTrue(Path(rows[0]["front_photo"]).exists())
+
+
 class ReviewTests(unittest.TestCase):
     def test_round_trip_and_totals(self):
         with tempfile.TemporaryDirectory() as d:

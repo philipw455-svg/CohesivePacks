@@ -6,12 +6,13 @@ import csv
 from pathlib import Path
 
 COLUMNS = [
-    "approve", "status", "card_id", "sku", "title", "start_price",
+    "approve", "status", "card_id", "sku", "title", "start_price", "estimate_low",
+    "estimate_high",
     "quick_sale_value", "store_cash_estimate", "comps_found",
     "player", "year", "manufacturer", "set_name", "card_number", "team", "sport",
     "parallel", "insert_name", "serial_number", "rookie", "autographed", "memorabilia",
-    "graded", "grader", "grade", "condition", "condition_notes", "confidence",
-    "search_query", "front_photo", "back_photo", "raw_front", "raw_back",
+    "graded", "grader", "grade", "cert_number", "condition", "condition_notes", "confidence",
+    "search_query", "front_name", "back_name", "front_photo", "back_photo", "raw_front", "raw_back",
     "listing_id", "listing_url", "error",
 ]
 

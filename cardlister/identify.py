@@ -34,6 +34,7 @@ class CardInfo(BaseModel):
     graded: bool
     grader: str
     grade: str
+    cert_number: str = ""
     condition: Condition
     condition_notes: str
     title: str
@@ -60,6 +61,7 @@ def _strict_schema() -> dict:
         "graded": {"type": "boolean"},
         "grader": {"type": "string"},
         "grade": {"type": "string"},
+        "cert_number": {"type": "string"},
         "condition": {
             "type": "string",
             "enum": ["near_mint_or_better", "excellent", "very_good", "poor"],
@@ -88,6 +90,8 @@ Rules:
 - parallel: color or refractor name only if the card is a parallel.
 - serial_number: like "25/99" only if stamped on the card.
 - graded: true only if the card sits in a grading company slab.
+  Then copy grader (PSA, BGS, SGC, CGC...), grade (like "9" or "Authentic")
+  and cert_number from the slab label.
 - condition: judge corners, edges, surface, and centering you can see.
   Be conservative. List visible flaws in condition_notes.
 - title: an eBay title of at most 80 characters, for example

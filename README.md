@@ -170,9 +170,22 @@ These numbers are rough guesses. Treat them as a starting point only.
 - **Store cash estimate.** The program multiplies the quick-sale value by `STORE_CASH_RATE`. The default is 50 percent. Card shops set their own offers, so change this number to match your local shop.
 - **Bulk cards.** Cards under `BULK_THRESHOLD` ($3 by default) count as bulk. Each bulk card counts as `BULK_CASH_PER_CARD` ($0.05 by default).
 
+## Listing a prepared card list
+
+`cards/batch-2026-11-17.csv` already holds all 17 cards from the first batch: titles, details, value estimates, and start prices.
+
+1. Copy the 34 photos from your iPhone into the `inbox` folder. Keep their names, like `IMG_2302`.
+2. Run `python -m cardlister import cards/batch-2026-11-17.csv`
+3. Check `output/review.csv` and type `yes` in the approve column.
+4. Run `python -m cardlister post`
+
+### How start prices work
+
+Each start price covers the store cash value plus eBay's fees (about 13.25% plus $0.40 per order). So any winning bid pays you at least what a card shop would pay in cash. Cheap cards start at $0.99. Shipping is not included, so set your shipping policy to have the buyer pay shipping.
+
 ## Limits to know
 
-- **Graded cards.** The program marks graded cards "list by hand". eBay needs extra grading details for slabs.
+- **Graded cards.** The program lists PSA, BGS, SGC, CGC, and other slabs with the grader, grade, and certification number. Test one graded card in the sandbox first, because eBay rejects a listing whose grade codes do not match.
 - **Photo honesty.** Photoroom replaces only the background. It does not repaint the card. eBay requires photos of the real item.
 - **Sandbox first.** Keep `EBAY_ENV=sandbox` until test listings look right. Then change it to `production` and run `login` again.
 

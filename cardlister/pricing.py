@@ -52,3 +52,25 @@ def store_cash(quick_sale: float | None, rate: float, bulk_threshold: float, bul
     if quick_sale is None or quick_sale < bulk_threshold:
         return bulk_cash
     return round(quick_sale * rate, 2)
+
+
+# eBay keeps about 13.25% of a trading card sale plus a small fee per order.
+EBAY_FEE_RATE = 0.1325
+EBAY_ORDER_FEE = 0.40
+MIN_START = 0.99
+
+
+def floor_start_price(store_cash: float, fee_rate: float = EBAY_FEE_RATE,
+                      order_fee: float = EBAY_ORDER_FEE) -> float:
+    """Returns the lowest start price that still pays you the store cash after eBay fees.
+
+    Any winning bid at or above this price leaves you at least what a shop would pay.
+    """
+    needed = (store_cash + order_fee) / (1 - fee_rate)
+    whole_cents = -(-round(needed * 100, 6) // 1)  # round up to the next cent
+    return max(MIN_START, whole_cents / 100)
+
+
+def net_after_fees(price: float, fee_rate: float = EBAY_FEE_RATE,
+                   order_fee: float = EBAY_ORDER_FEE) -> float:
+    return round(price * (1 - fee_rate) - order_fee, 2)

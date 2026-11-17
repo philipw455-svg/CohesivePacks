@@ -49,6 +49,28 @@ CARD_CONDITION_VALUES = {
 }
 
 
+# eBay condition codes for graded trading cards (cards sealed in a grading slab).
+# Check these in the sandbox: eBay rejects a listing whose codes do not match.
+GRADED_CONDITION = "LIKE_NEW"  # eBay shows this as "Graded" for cards.
+GRADER_DESCRIPTOR = "27501"
+GRADE_DESCRIPTOR = "27502"
+CERT_DESCRIPTOR = "27503"
+GRADER_VALUES = {
+    "PSA": "275010", "BCCG": "275011", "BVG": "275012", "BGS": "275013",
+    "CSG": "275014", "CGC": "275015", "SGC": "275016", "KSA": "275017",
+    "GMA": "275018", "HGA": "275019", "ISA": "2750110", "PCA": "2750111",
+    "GSG": "2750112", "PGS": "2750113", "MNT": "2750114", "TAG": "2750115",
+    "OTHER": "2750123",
+}
+GRADE_VALUES = {
+    "10": "275020", "9.5": "275021", "9": "275022", "8.5": "275023", "8": "275024",
+    "7.5": "275025", "7": "275026", "6.5": "275027", "6": "275028", "5.5": "275029",
+    "5": "2750210", "4.5": "2750211", "4": "2750212", "3.5": "2750213", "3": "2750214",
+    "2.5": "2750215", "2": "2750216", "1.5": "2750217", "1": "2750218",
+    "AUTHENTIC": "2750219",
+}
+
+
 class EbayError(RuntimeError):
     pass
 

@@ -1,6 +1,7 @@
 """Commands you type to run the card lister.
 
   python -m cardlister scan       Group photos into cards and find each last sale price.
+  python -m cardlister import     Add cards from a prepared card list.
   python -m cardlister login      Sign in to your eBay seller account (one time).
   python -m cardlister policies   Show your eBay payment, return, and shipping policy IDs.
   python -m cardlister location   Save your ship-from address on eBay (one time).
@@ -266,7 +267,7 @@ def cmd_process(s: Settings, args) -> None:
                 raw_front=str(raw_front),
                 raw_back=str(raw_back),
                 approve="",
-                status="graded: list by hand" if info.graded else "ready",
+                status="ready",
             )
             rows.append(row)
             _move(pair.first, s.inbox_dir / "done")
@@ -285,6 +286,60 @@ def cmd_process(s: Settings, args) -> None:
 
     print(f"\nReview sheet saved: {s.review_csv}")
     print("Open it, check each card, and type 'yes' in the approve column.")
+    _print_totals(rows)
+
+
+def _find_photo(inbox: Path, name: str) -> Path | None:
+    """Finds a photo by name, whatever its ending (.jpeg, .jpg, .heic)."""
+    stem = Path(name).stem.lower()
+    for path in inbox.rglob("*"):
+        if path.is_file() and path.stem.lower() == stem:
+            return path
+    return None
+
+
+def cmd_import(s: Settings, args) -> None:
+    """Adds cards from a prepared card list, so no AI card reading is needed."""
+    import csv
+
+    from .editor import make_editor
+
+    with open(args.card_list, newline="", encoding="utf-8-sig") as fh:
+        cards = list(csv.DictReader(fh))
+    editor = make_editor(s.photoroom_api_key, s.studio_background)
+    rows = review.read_rows(s.review_csv)
+    known = {r.get("front_name") for r in rows}
+    card_no = review.next_card_number(rows)
+    added = 0
+    for card in cards:
+        if card.get("front_name") in known:
+            print(f"Skipped {card['title']}: already in the review sheet.")
+            continue
+        front = _find_photo(s.inbox_dir, card["front_name"])
+        back = _find_photo(s.inbox_dir, card["back_name"])
+        if not front or not back:
+            print(f"Missing photo for {card['title']}: "
+                  f"{card['front_name']} or {card['back_name']}. Copy it into {s.inbox_dir}")
+            continue
+        card_id = f"{card_no:04d}"
+        folder = s.output_dir / "cards" / f"card_{card_id}"
+        folder.mkdir(parents=True, exist_ok=True)
+        row = dict(card)
+        row.update(
+            card_id=card_id, sku=f"CP-{card_id}", approve="", status="ready",
+            front_photo=str(editor.edit(front, folder / "front.jpg")),
+            back_photo=str(editor.edit(back, folder / "back.jpg")),
+            raw_front=str(front), raw_back=str(back),
+        )
+        if listing.is_graded(row) and listing.graded_problem(row):
+            row["status"] = "error"
+            row["error"] = listing.graded_problem(row)
+        rows.append(row)
+        review.write_rows(s.review_csv, rows)
+        print(f"Card {card_id}: {row['title']}  |  start ${float(row['start_price']):.2f}")
+        card_no += 1
+        added += 1
+    print(f"\nAdded {added} cards to {s.review_csv}")
     _print_totals(rows)
 
 
@@ -339,6 +394,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("folder", nargs="?", default="",
                    help="Folder of photos. The inbox folder is the default.")
     p.add_argument("--limit", type=int, default=0, help="Value only this many cards.")
+    p = sub.add_parser("import")
+    p.add_argument("card_list", help="A prepared card list, like cards/batch-2026-11-17.csv")
     sub.add_parser("login")
     sub.add_parser("policies")
     sub.add_parser("location")
@@ -349,7 +406,7 @@ def main(argv: list[str] | None = None) -> None:
                    help="Post every 'ready' card without the approve column.")
     sub.add_parser("summary")
     args = parser.parse_args(argv)
-    handlers = {"scan": cmd_scan, "login": cmd_login, "policies": cmd_policies, "location": cmd_location,
+    handlers = {"scan": cmd_scan, "import": cmd_import, "login": cmd_login, "policies": cmd_policies, "location": cmd_location,
                 "process": cmd_process, "post": cmd_post, "summary": cmd_summary}
     try:
         handlers[args.command](load_settings(), args)
