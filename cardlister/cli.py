@@ -1,5 +1,6 @@
 """Commands you type to run the card lister.
 
+  python -m cardlister scan       Group photos into cards and find each last sale price.
   python -m cardlister login      Sign in to your eBay seller account (one time).
   python -m cardlister policies   Show your eBay payment, return, and shipping policy IDs.
   python -m cardlister location   Save your ship-from address on eBay (one time).
@@ -73,6 +74,141 @@ def _pricing_client(s: Settings):
     return EbayPricing("production", s.pricing_app_id, s.pricing_cert_id)
 
 
+def _price_card(s: Settings, prices, info):
+    """Returns (quick-sale value or None, listings compared, store cash estimate)."""
+    quick, comps = None, 0
+    if prices and info.search_query:
+        try:
+            found = prices.search_prices(info.search_query)
+            est = pricing.estimate(pricing.clean_comps(found, info.graded))
+            quick, comps = est.quick_sale, est.comps_used
+        except Exception as exc:  # A price failure should not stop the card.
+            print(f"  Price lookup failed: {exc}")
+    cash = pricing.store_cash(quick, s.store_cash_rate, s.bulk_threshold, s.bulk_cash_per_card)
+    return quick, comps, cash
+
+
+def _card_reader(s: Settings):
+    from .identify import CardReader
+
+    if not s.anthropic_api_key:
+        raise SystemExit("Fill in ANTHROPIC_API_KEY in your .env file first.")
+    import anthropic
+
+    return CardReader(anthropic.Anthropic(api_key=s.anthropic_api_key))
+
+
+SCAN_COLUMNS = [
+    "card", "front_photo", "back_photo", "title", "player", "year", "manufacturer",
+    "set_name", "card_number", "parallel", "serial_number", "rookie", "autographed",
+    "graded", "grader", "grade", "condition", "condition_notes", "confidence",
+    "last_sale_price", "last_sale_date", "last_sale_link", "sold_median", "sales_found",
+    "sale_match", "store_cash_estimate", "recent_sales", "price_notes", "error",
+]
+
+
+def _write_csv(path: Path, columns: list[str], rows: list[dict]) -> None:
+    import csv
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def cmd_scan(s: Settings, args) -> None:
+    """Groups photos into cards, reads each card, and finds its last sale price.
+
+    Your photos stay where they are.
+    """
+    from .grouping import Photo, group_photos
+    from .identify import PhotoReader
+    from .photos import capture_time
+    from .sales import SaleFinder
+
+    folder = Path(args.folder).expanduser() if args.folder else s.inbox_dir
+    folder.mkdir(parents=True, exist_ok=True)
+    paths = find_photos(folder)
+    if not paths:
+        print(f"No photos found. Put photos in {folder}")
+        return
+    reader = _card_reader(s)
+    client = reader.client
+    photo_reader, finder = PhotoReader(client), SaleFinder(client)
+
+    print(f"Step 1 of 3: reading {len(paths)} photos.")
+    photos = []
+    for i, path in enumerate(paths, 1):
+        try:
+            side = photo_reader.read(path)
+            photos.append(Photo(path, capture_time(path), side))
+            print(f"  {i}/{len(paths)} {path.name}: {side.side}, {side.player or 'no name read'}")
+        except Exception as exc:
+            print(f"  {i}/{len(paths)} {path.name}: failed ({exc})")
+
+    groups = group_photos(photos)
+    if args.limit:
+        groups = groups[: args.limit]
+    two_sided = sum(1 for g in groups if g.front and g.back)
+    print(f"\nStep 2 of 3: grouped into {len(groups)} cards "
+          f"({two_sided} with front and back).")
+
+    print("\nStep 3 of 3: reading each card and searching for sold prices.")
+    out = s.output_dir / "values.csv"
+    rows = []
+    for n, group in enumerate(groups, 1):
+        row = {"card": n, "front_photo": group.front.name if group.front else "",
+               "back_photo": group.back.name if group.back else ""}
+        try:
+            if group.front and group.back:
+                info = reader.read(group.front, group.back)
+            else:
+                info = reader.read_one(group.photos[0])
+            report = finder.find(info)
+            last = report.last_sale
+            median = report.typical_price
+            cash = pricing.store_cash(median, s.store_cash_rate, s.bulk_threshold,
+                                      s.bulk_cash_per_card)
+            row.update(info.model_dump(exclude={"front_photo"}))
+            row.update(
+                last_sale_price=f"{last['price_usd']:.2f}" if last else "",
+                last_sale_date=last.get("date", "") if last else "",
+                last_sale_link=last.get("url", "") if last else "",
+                sold_median="" if median is None else f"{median:.2f}",
+                sales_found=len(report.sales),
+                sale_match=report.match,
+                store_cash_estimate=f"{cash:.2f}",
+                recent_sales="; ".join(f"${x['price_usd']:.2f} {x.get('date', '')}".strip()
+                                       for x in report.sales),
+                price_notes=report.notes,
+            )
+            shown = f"last sold ${last['price_usd']:.2f} ({last.get('date') or 'date unknown'})" \
+                if last else "no sales found"
+            print(f"{n:>4}. {info.title}  |  {shown}  |  store cash ${cash:.2f}")
+        except Exception as exc:
+            row["error"] = str(exc)[:500]
+            print(f"{n:>4}. Failed: {exc}")
+        rows.append(row)
+        _write_csv(out, SCAN_COLUMNS, rows)
+
+    print(f"\nValue sheet saved: {out}")
+    _print_scan_totals(rows)
+
+
+def _print_scan_totals(rows: list[dict]) -> None:
+    def total(key):
+        return sum(float(r[key]) for r in rows if r.get(key) and not r.get("error"))
+
+    good = [r for r in rows if not r.get("error")]
+    found = sum(1 for r in good if r.get("last_sale_price"))
+    print(f"\nCards: {len(good)} ({found} with a sold price found)")
+    print(f"Last-sale total:           ${total('last_sale_price'):.2f}")
+    print(f"Typical sold-price total:  ${total('sold_median'):.2f}")
+    print(f"Store cash estimate total: ${total('store_cash_estimate'):.2f}")
+    print("Check the links in the value sheet before you rely on any price.")
+
+
 def _move(path: Path, folder: Path) -> None:
     folder.mkdir(parents=True, exist_ok=True)
     shutil.move(str(path), str(folder / path.name))
@@ -80,10 +216,8 @@ def _move(path: Path, folder: Path) -> None:
 
 def cmd_process(s: Settings, args) -> None:
     from .editor import make_editor
-    from .identify import CardReader
 
-    if not s.anthropic_api_key:
-        raise SystemExit("Fill in ANTHROPIC_API_KEY in your .env file first.")
+    reader = _card_reader(s)
     s.inbox_dir.mkdir(exist_ok=True)
     photos = find_photos(s.inbox_dir)
     pairs, leftover = pair_photos(photos)
@@ -95,9 +229,6 @@ def cmd_process(s: Settings, args) -> None:
     if args.limit:
         pairs = pairs[: args.limit]
 
-    import anthropic
-
-    reader = CardReader(anthropic.Anthropic(api_key=s.anthropic_api_key))
     editor = make_editor(s.photoroom_api_key, s.studio_background)
     prices = _pricing_client(s)
     print(f"Found {len(pairs)} cards. Photo editor: {editor.name}.")
@@ -120,16 +251,7 @@ def cmd_process(s: Settings, args) -> None:
             front_out = editor.edit(front, folder / "front.jpg")
             back_out = editor.edit(back, folder / "back.jpg")
 
-            quick, comps = None, 0
-            if prices and info.search_query:
-                try:
-                    found = prices.search_prices(info.search_query)
-                    est = pricing.estimate(pricing.clean_comps(found, info.graded))
-                    quick, comps = est.quick_sale, est.comps_used
-                except Exception as exc:  # A price failure should not stop the card.
-                    print(f"  Price lookup failed: {exc}")
-            cash = pricing.store_cash(quick, s.store_cash_rate, s.bulk_threshold,
-                                      s.bulk_cash_per_card)
+            quick, comps, cash = _price_card(s, prices, info)
 
             row = info.model_dump()
             row.update(
@@ -213,6 +335,10 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="cardlister", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
+    p = sub.add_parser("scan")
+    p.add_argument("folder", nargs="?", default="",
+                   help="Folder of photos. The inbox folder is the default.")
+    p.add_argument("--limit", type=int, default=0, help="Value only this many cards.")
     sub.add_parser("login")
     sub.add_parser("policies")
     sub.add_parser("location")
@@ -223,7 +349,7 @@ def main(argv: list[str] | None = None) -> None:
                    help="Post every 'ready' card without the approve column.")
     sub.add_parser("summary")
     args = parser.parse_args(argv)
-    handlers = {"login": cmd_login, "policies": cmd_policies, "location": cmd_location,
+    handlers = {"scan": cmd_scan, "login": cmd_login, "policies": cmd_policies, "location": cmd_location,
                 "process": cmd_process, "post": cmd_post, "summary": cmd_summary}
     try:
         handlers[args.command](load_settings(), args)

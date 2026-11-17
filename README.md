@@ -10,7 +10,49 @@ This program turns iPhone photos of football cards into eBay auctions.
 6. You check every card in a spreadsheet.
 7. The program posts each approved card as a 3-day eBay auction.
 
-## What you need
+## Quick start: scan card values only
+
+The scan finds each card's value. It does not edit photos or post anything to eBay.
+It needs only an Anthropic API key, from console.anthropic.com.
+
+1. Install the program (see "Install the program" below).
+2. Put `ANTHROPIC_API_KEY=your-key` in a file named `.env` in this folder.
+3. Copy all your card photos into the `inbox` folder. Any order works.
+4. Run:
+
+```
+python -m cardlister scan
+```
+
+You can also scan another folder: `python -m cardlister scan "C:\Users\you\Pictures\cards"`.
+Try `--limit 3` first to test three cards.
+
+### What the scan does
+
+1. **Reads every photo.** Claude decides whether each photo shows a front or a back. It copies the player, set, year, and number printed on that side.
+2. **Groups the photos into cards.** The program matches each front to its back by player, set, and number. When two backs fit, the photo taken closest in time wins. A photo without a match counts as a one-sided card.
+3. **Finds sold prices.** Claude searches the web for the card's recent sold prices. It looks at sites like eBay sold listings and 130point. It skips asking prices, card lots, and slabs with a different grade.
+
+### What you get
+
+The program saves `output/values.csv`. You open it in Excel or Numbers. Each row is one card with:
+
+- the card title and details
+- the last sale price, its date, and a link to that sale
+- the middle price of up to 5 recent sales ("sold_median")
+- a store cash estimate
+
+The program also prints the totals for all cards. The scan leaves your photos in place.
+
+### Cost
+
+The scan makes three Claude calls per card plus up to 5 web searches. Check console.anthropic.com for current prices. Test with `--limit 3` and look at your usage page.
+
+### Check the prices
+
+Claude can pick the wrong sale, such as a different parallel. Each sale has a link. Open the link before you trust a high price. The "sale_match" column says "exact", "close", or "none".
+
+## What you need for eBay posting
 
 | Item | Where you get it | Cost |
 |---|---|---|
@@ -123,7 +165,8 @@ python -m cardlister summary
 
 These numbers are rough guesses. Treat them as a starting point only.
 
-- **Quick-sale value.** eBay does not share sold prices with most developers. So the program reads current Buy It Now listings. It skips graded slabs and card lots. It then takes the price at the bottom quarter of the matches. Sellers often ask more than buyers pay, so the low end fits a quick sale better.
+- **Scan.** The `scan` command bases the store cash estimate on the middle of the recent sold prices.
+- **Quick-sale value (process command).** eBay does not share sold prices with most developers. So the program reads current Buy It Now listings. It skips graded slabs and card lots. It then takes the price at the bottom quarter of the matches. Sellers often ask more than buyers pay, so the low end fits a quick sale better.
 - **Store cash estimate.** The program multiplies the quick-sale value by `STORE_CASH_RATE`. The default is 50 percent. Card shops set their own offers, so change this number to match your local shop.
 - **Bulk cards.** Cards under `BULK_THRESHOLD` ($3 by default) count as bulk. Each bulk card counts as `BULK_CASH_PER_CARD` ($0.05 by default).
 

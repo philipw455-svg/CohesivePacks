@@ -188,3 +188,136 @@ class SellerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def side(kind, player="", number="", year="", maker="", set_name=""):
+    from cardlister.identify import PhotoSide
+
+    return PhotoSide(side=kind, player=player, team="", year=year, manufacturer=maker,
+                     set_name=set_name, card_number=number, parallel="")
+
+
+class GroupingTests(unittest.TestCase):
+    def test_matches_fronts_and_backs_in_any_order(self):
+        from datetime import datetime, timedelta
+
+        from cardlister.grouping import Photo, group_photos
+
+        t0 = datetime(2026, 11, 1, 12, 0, 0)
+        at = lambda sec: t0 + timedelta(seconds=sec)
+        photos = [
+            Photo(Path("a.jpg"), at(0), side("front", "Patrick Mahomes II", set_name="Prizm")),
+            Photo(Path("b.jpg"), at(5), side("front", "Josh Allen")),
+            Photo(Path("c.jpg"), at(10), side("back", "Josh Allen", "12", "2022")),
+            Photo(Path("d.jpg"), at(15), side("back", "Patrick Mahomes", "1", "2023", "Panini",
+                                              "Prizm")),
+            Photo(Path("e.jpg"), at(20), side("front", "Josh Allen")),  # a second Allen card
+            Photo(Path("f.jpg"), at(25), side("front", "Puka Nacua")),
+            Photo(Path("g.jpg"), at(30), side("back", "")),  # back with no name printed
+            Photo(Path("h.jpg"), at(40), side("back", "Bijan Robinson", "5")),
+        ]
+        groups = {(g.front.name if g.front else None, g.back.name if g.back else None)
+                  for g in group_photos(photos)}
+        self.assertEqual(groups, {("a.jpg", "d.jpg"), ("b.jpg", "c.jpg"), ("e.jpg", None),
+                                  ("f.jpg", "g.jpg"), (None, "h.jpg")})
+
+    def test_different_card_numbers_never_match(self):
+        from datetime import datetime
+
+        from cardlister.grouping import Photo, group_photos
+
+        now = datetime(2026, 1, 1)
+        photos = [Photo(Path("a.jpg"), now, side("front", "Josh Allen", "12")),
+                  Photo(Path("b.jpg"), now, side("back", "Josh Allen", "99"))]
+        self.assertEqual(len(group_photos(photos)), 2)
+
+
+class FakeSalesClient:
+    """Pauses once, then reports sales through the report_sales tool."""
+
+    def __init__(self):
+        self.calls = []
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
+
+    def _create(self, **kw):
+        self.calls.append(kw)
+        if len(self.calls) == 1:
+            block = SimpleNamespace(type="server_tool_use", name="web_search")
+            return SimpleNamespace(content=[block], stop_reason="pause_turn")
+        tool = SimpleNamespace(type="tool_use", name="report_sales", input={
+            "match": "exact", "notes": "",
+            "sales": [{"price_usd": 12.0, "date": "2026-11-10", "title": "t", "url": "u1"},
+                      {"price_usd": 8.0, "date": "2026-11-02", "title": "t", "url": "u2"},
+                      {"price_usd": 10.0, "date": "2026-10-28", "title": "t", "url": "u3"}]})
+        return SimpleNamespace(content=[tool], stop_reason="tool_use")
+
+
+class SalesTests(unittest.TestCase):
+    def test_resumes_pause_and_reads_report(self):
+        from cardlister.identify import CardInfo
+        from cardlister.sales import SaleFinder
+
+        client = FakeSalesClient()
+        report = SaleFinder(client).find(CardInfo.model_validate(CARD_JSON))
+        self.assertEqual(report.last_sale["price_usd"], 12.0)
+        self.assertEqual(report.typical_price, 10.0)
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(client.calls[1]["messages"][-1]["role"], "assistant")
+        tool_types = [t.get("type", t.get("name")) for t in client.calls[0]["tools"]]
+        self.assertIn("web_search_20260209", tool_types)
+        self.assertIn("raw (ungraded)", client.calls[0]["messages"][0]["content"])
+
+
+class ScanTests(unittest.TestCase):
+    def test_scan_groups_values_and_leaves_photos(self):
+        import csv
+        import sys
+        import types
+
+        from cardlister import cli, config
+        from cardlister.identify import CardReader, PhotoReader
+
+        sides = {"IMG_0.jpg": side("back", "C.J. Stroud", "301"),
+                 "IMG_1.jpg": side("front", "C.J. Stroud"),
+                 "IMG_2.jpg": side("front", "Bryce Young")}
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "inbox").mkdir()
+            for i in range(3):
+                make_photo(d / "inbox" / f"IMG_{i}.jpg", "red", time.time() + i)
+            orig = config.load_settings
+
+            def patched():
+                s = orig()
+                s.inbox_dir, s.output_dir = d / "inbox", d / "output"
+                return s
+
+            fake_mod = types.ModuleType("anthropic")
+            fake_mod.Anthropic = lambda **kw: FakeSalesClient()
+            env = {"ANTHROPIC_API_KEY": "x", "STORE_CASH_RATE": "0.5"}
+            with mock.patch.dict(sys.modules, {"anthropic": fake_mod}), \
+                    mock.patch.dict(os.environ, env), \
+                    mock.patch.object(cli, "load_settings", patched), \
+                    mock.patch.object(PhotoReader, "read", lambda self, p: sides[p.name]), \
+                    mock.patch.object(CardReader, "read",
+                                      lambda self, a, b: __import__("cardlister.identify")
+                                      .identify.CardInfo.model_validate(CARD_JSON)), \
+                    mock.patch.object(CardReader, "read_one",
+                                      lambda self, a: __import__("cardlister.identify")
+                                      .identify.CardInfo.model_validate(CARD_JSON)):
+                cli.main(["scan"])
+
+            with (d / "output" / "values.csv").open(encoding="utf-8-sig") as fh:
+                rows = list(csv.DictReader(fh))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual((rows[0]["front_photo"], rows[0]["back_photo"]),
+                             ("IMG_1.jpg", "IMG_0.jpg"))
+            self.assertEqual(rows[0]["last_sale_price"], "12.00")
+            self.assertEqual(rows[0]["sold_median"], "10.00")
+            self.assertEqual(rows[0]["store_cash_estimate"], "5.00")
+            self.assertEqual(rows[1]["back_photo"], "")
+            self.assertEqual(len(list((d / "inbox").glob("*.jpg"))), 3)
+
+
+if __name__ == "__main__":
+    unittest.main()

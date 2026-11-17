@@ -118,6 +118,20 @@ class CardReader:
             client = anthropic.Anthropic()
         self.client = client
 
+    def read_one(self, photo: Path) -> CardInfo:
+        """Reads a card when only one side was photographed."""
+        data = _call_json(
+            self.client,
+            [{"type": "text", "text": "Photo 1:"}, _image_block(photo),
+             {"type": "text", "text": PROMPT + "\nOnly one side was photographed. "
+              "Set front_photo to \"first\"."}],
+            _strict_schema(),
+            effort="medium",
+        )
+        info = CardInfo.model_validate(data)
+        info.title = info.title.strip()[:80]
+        return info
+
     def read(self, first: Path, second: Path) -> CardInfo:
         response = self.client.beta.messages.create(
             model=MODEL,
@@ -149,3 +163,64 @@ class CardReader:
         info = CardInfo.model_validate(json.loads(text))
         info.title = info.title.strip()[:80]
         return info
+
+
+# ---- One photo at a time, used to group fronts with backs ----
+
+
+class PhotoSide(BaseModel):
+    side: Literal["front", "back", "unknown"]
+    player: str
+    team: str
+    year: str
+    manufacturer: str
+    set_name: str
+    card_number: str
+    parallel: str
+
+
+PHOTO_PROMPT = """This photo shows one side of one sports trading card.
+Say which side it shows and copy what is printed on THIS side only.
+- side: "front" for the player picture side, "back" for the stats or text side.
+- Use an empty string for anything not printed on this side.
+- card_number: digits and letters only, without the "#" sign."""
+
+
+def _photo_schema() -> dict:
+    props = {name: {"type": "string"} for name in PhotoSide.model_fields}
+    props["side"] = {"type": "string", "enum": ["front", "back", "unknown"]}
+    return {"type": "object", "properties": props, "required": list(props),
+            "additionalProperties": False}
+
+
+def _call_json(client, content: list, schema: dict, effort: str) -> dict:
+    response = client.beta.messages.create(
+        model=MODEL,
+        max_tokens=16000,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+        output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
+        messages=[{"role": "user", "content": content}],
+    )
+    if response.stop_reason == "refusal":
+        raise RuntimeError("Claude declined to read this photo.")
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError("Claude's answer was cut off.")
+    text = "".join(b.text for b in response.content if getattr(b, "type", "") == "text")
+    return json.loads(text)
+
+
+class PhotoReader:
+    """Reads one side of a card from one photo."""
+
+    def __init__(self, client):
+        self.client = client
+
+    def read(self, path: Path) -> PhotoSide:
+        data = _call_json(
+            self.client,
+            [_image_block(path), {"type": "text", "text": PHOTO_PROMPT}],
+            _photo_schema(),
+            effort="low",
+        )
+        return PhotoSide.model_validate(data)
