@@ -1,0 +1,604 @@
+<title>Cohesive Packs Scanner</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: one narrow column, like a stack of top loaders. Summary first, then each card. */
+:root {
+  --bg: #eef0f3;
+  --surface: #ffffff;
+  --ink: #16202c;
+  --muted: #5b6676;
+  --line: #d5dae2;
+  --accent: #1f4fd1;
+  --accent-ink: #ffffff;
+  --gold: #8a6400;
+  --gold-bg: #fff4d6;
+  --good: #1d7a46;
+  --warn: #a35b00;
+  --bad: #b3261e;
+  --pill: #e4e8ef;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141b; --surface: #18202a; --ink: #e8edf3; --muted: #9aa6b6; --line: #2a3542;
+    --accent: #7a9cff; --accent-ink: #0b1220; --gold: #f2c45a; --gold-bg: #2d2412;
+    --good: #5ccf8d; --warn: #f0a94a; --bad: #ff8a80; --pill: #243040; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141b; --surface: #18202a; --ink: #e8edf3; --muted: #9aa6b6; --line: #2a3542;
+  --accent: #7a9cff; --accent-ink: #0b1220; --gold: #f2c45a; --gold-bg: #2d2412;
+  --good: #5ccf8d; --warn: #f0a94a; --bad: #ff8a80; --pill: #243040; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+.wrap { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 {
+  font-family: var(--font-display); font-weight: 700; font-size: 34px; line-height: 1;
+  letter-spacing: 0.01em; text-transform: uppercase; margin: 0; text-wrap: balance;
+}
+.lede { margin: 6px 0 0; color: var(--muted); max-width: 60ch; }
+.panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.label {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted);
+}
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+button, .btn {
+  font: inherit; font-weight: 600; border-radius: 10px; padding: 12px 16px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button:focus-visible, .btn:focus-within, a:focus-visible, input:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px;
+}
+.grow { flex: 1 1 160px; }
+#photoInput { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.thumbs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.thumbs img {
+  width: 48px; height: 66px; object-fit: cover; border-radius: 5px; flex: none;
+  border: 1px solid var(--line);
+}
+.status { font-size: 14px; color: var(--muted); min-height: 1.4em; }
+.status.error { color: var(--bad); }
+.bar { height: 6px; background: var(--pill); border-radius: 99px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+
+.totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.total .num {
+  font-family: var(--font-display); font-weight: 700; font-size: 30px; line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.total.cash .num { color: var(--gold); }
+.total small { display: block; color: var(--muted); font-size: 12px; }
+.rate { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+.rate input { width: 64px; }
+input[type="number"] {
+  font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); min-height: 40px; font-variant-numeric: tabular-nums;
+}
+
+.cards { display: flex; flex-direction: column; gap: 12px; }
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px;
+}
+.card.example { border-style: dashed; }
+.pics { display: flex; gap: 4px; }
+.pics img, .pics .blank {
+  width: 54px; height: 76px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--pill);
+}
+.pics .blank { display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--muted); text-align: center; }
+.info { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.title { font-weight: 600; overflow-wrap: anywhere; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--pill); color: var(--ink); }
+.chip.high { color: var(--good); }
+.chip.medium { color: var(--warn); }
+.chip.low { color: var(--bad); }
+.chip.tag-example { background: var(--gold-bg); color: var(--gold); font-weight: 600; }
+.values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; grid-column: 1 / -1; }
+.values .v small { display: block; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.values .v b { font-variant-numeric: tabular-nums; font-size: 16px; }
+.values .v.cash b { color: var(--gold); }
+.values input { width: 100%; }
+.links { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.links a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.links a:hover { text-decoration: underline; }
+.note { font-size: 13px; color: var(--muted); grid-column: 1 / -1; }
+.foot { font-size: 13px; color: var(--muted); max-width: 62ch; }
+.unavailable { background: var(--gold-bg); color: var(--ink); border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Cohesive Packs Scanner</h1>
+    <p class="lede">Add your card photos, fronts and backs, in any order. Claude groups them into cards and estimates what each one is worth.</p>
+  </header>
+
+  <section class="panel" aria-labelledby="addLabel">
+    <span class="label" id="addLabel">1. Photos</span>
+    <div class="row">
+      <label class="btn primary grow" for="photoInput">Add photos</label>
+      <input id="photoInput" type="file" accept="image/*" multiple>
+      <button id="clearPhotos" type="button" hidden>Remove photos</button>
+    </div>
+    <div class="thumbs" id="thumbs" aria-label="Photos added"></div>
+    <div class="status" id="photoCount">No photos yet. Take a photo of each card's front and back.</div>
+  </section>
+
+  <section class="panel" aria-labelledby="scanLabel">
+    <span class="label" id="scanLabel">2. Scan</span>
+    <div class="row">
+      <button id="scanBtn" class="primary grow" type="button" disabled>Scan cards</button>
+      <button id="stopBtn" type="button" hidden>Stop</button>
+    </div>
+    <div class="bar" aria-hidden="true"><i id="barFill"></i></div>
+    <div class="status" id="scanStatus" role="status"></div>
+    <div class="unavailable" id="noClaude" hidden>Scanning needs Claude. Open this page in the Claude app or on claude.ai while signed in.</div>
+  </section>
+
+  <section class="panel" aria-labelledby="totLabel">
+    <span class="label" id="totLabel">Totals</span>
+    <div class="totals">
+      <div class="total"><small>Cards</small><span class="num" id="tCards">0</span></div>
+      <div class="total"><small>Value (last sale where entered)</small><span class="num" id="tValue">$0.00</span></div>
+      <div class="total cash"><small>Store cash estimate</small><span class="num" id="tCash">$0.00</span></div>
+      <div class="total"><small>Last sales entered</small><span class="num" id="tEntered">0</span></div>
+    </div>
+    <div class="rate">
+      <label for="rateInput">A shop pays about</label>
+      <input id="rateInput" type="number" min="0" max="100" step="5" value="50" inputmode="numeric">
+      <span>% of value. Cards under $3 count as $0.05.</span>
+    </div>
+    <div class="row">
+      <button id="exportBtn" type="button" hidden>Save as spreadsheet (CSV)</button>
+      <button id="clearAll" type="button" hidden>Clear results</button>
+    </div>
+    <div class="status" id="exportStatus"></div>
+  </section>
+
+  <section class="cards" id="cards" aria-label="Cards"></section>
+
+  <p class="foot">The AI value is Claude's estimate from what it knows. It can be out of date or wrong. Tap "Sold on eBay" to see real recent sales, then type the last sale price into the box. The totals use your price when you enter one.</p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const money = (n) => "$" + (Number(n) || 0).toFixed(2);
+  const STORE_KEY = "cp-scanner-v1";
+  const BULK_UNDER = 3, BULK_CASH = 0.05;
+
+  /** photos: {id, blob, thumb, order, taken} */
+  let photos = [];
+  /** cards: {id, front, back, title, details, chips[], low, typical, high, confidence, note, search, lastSale, example} */
+  let cards = [];
+  let sample = null, ctl = null, busy = false;
+
+  const EXAMPLE = {
+    id: "example", example: true, frontThumb: "", backThumb: "",
+    title: "2023 Panini Prizm #301 C.J. Stroud Rookie RC",
+    chips: ["Rookie", "Ungraded", "Near Mint"], low: 6, typical: 9, high: 14,
+    confidence: "medium", note: "Example card. Your scanned cards replace it.",
+    search: "2023 Prizm 301 CJ Stroud", lastSale: ""
+  };
+
+  // ---------- Saved results (this phone only) ----------
+  function save() {
+    try {
+      const keep = cards.filter((c) => !c.example);
+      localStorage.setItem(STORE_KEY, JSON.stringify({ cards: keep, rate: $("rateInput").value }));
+    } catch (e) { /* storage blocked: results last until the page closes */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (Array.isArray(data.cards)) cards = data.cards;
+      if (data.rate) $("rateInput").value = data.rate;
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---------- Photos ----------
+  async function decode(file) {
+    try { return await createImageBitmap(file, { imageOrientation: "from-image" }); }
+    catch (e) {
+      return await new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => { resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not open " + file.name)); };
+        img.src = url;
+      });
+    }
+  }
+  function draw(src, maxSide) {
+    const w = src.width, h = src.height, k = Math.min(1, maxSide / Math.max(w, h));
+    const c = document.createElement("canvas");
+    c.width = Math.round(w * k); c.height = Math.round(h * k);
+    c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+    return c;
+  }
+  async function addFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    $("photoCount").textContent = "Preparing " + files.length + " photos...";
+    files.sort((a, b) => (a.lastModified - b.lastModified) || a.name.localeCompare(b.name));
+    let failed = 0;
+    for (const file of files) {
+      try {
+        const bmp = await decode(file);
+        const big = draw(bmp, 1400);
+        const blob = await new Promise((r) => big.toBlob(r, "image/jpeg", 0.86));
+        const thumb = draw(bmp, 180).toDataURL("image/jpeg", 0.7);
+        if (bmp.close) bmp.close();
+        photos.push({ id: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          blob, thumb, order: photos.length, taken: file.lastModified || 0, name: file.name });
+      } catch (e) { failed++; }
+    }
+    renderPhotos(failed);
+  }
+  function renderPhotos(failed) {
+    const strip = $("thumbs");
+    strip.textContent = "";
+    for (const p of photos) {
+      const img = document.createElement("img");
+      img.src = p.thumb; img.alt = p.name || "Card photo";
+      strip.append(img);
+    }
+    const n = photos.length;
+    $("photoCount").textContent = n
+      ? n + (n === 1 ? " photo ready." : " photos ready.") + (failed ? " " + failed + " could not be opened." : "")
+      : "No photos yet. Take a photo of each card's front and back.";
+    $("clearPhotos").hidden = !n;
+    $("scanBtn").disabled = !n || busy || !sample;
+    $("scanBtn").textContent = n ? "Scan " + n + (n === 1 ? " photo" : " photos") : "Scan cards";
+  }
+
+  // ---------- Grouping fronts with backs ----------
+  const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const lastName = (s) => {
+    const w = String(s || "").toLowerCase().match(/[a-z]+/g) || [];
+    const kept = w.filter((x) => !["jr", "sr", "ii", "iii", "iv"].includes(x));
+    return kept.length ? kept[kept.length - 1] : "";
+  };
+  function matchCost(f, b) {
+    const fs = f.side, bs = b.side;
+    if (!norm(fs.player) || !norm(bs.player)) return null;
+    if (norm(fs.player) !== norm(bs.player) && lastName(fs.player) !== lastName(bs.player)) return null;
+    if (norm(fs.card_number) && norm(bs.card_number) && norm(fs.card_number) !== norm(bs.card_number)) return null;
+    const fy = String(fs.year || "").slice(0, 4), by = String(bs.year || "").slice(0, 4);
+    if (fy && by && fy !== by) return null;
+    let cost = Math.abs(f.order - b.order);
+    for (const k of ["manufacturer", "set_name"]) {
+      const a = norm(fs[k]), c = norm(bs[k]);
+      if (a && c && !a.includes(c) && !c.includes(a)) cost += 50;
+    }
+    return cost;
+  }
+  function groupPhotos(read) {
+    const ordered = read.slice().sort((a, b) => a.order - b.order);
+    const fronts = ordered.filter((p) => p.side.side === "front");
+    const backs = ordered.filter((p) => p.side.side === "back");
+    const options = [];
+    fronts.forEach((f, fi) => backs.forEach((b, bi) => {
+      const c = matchCost(f, b);
+      if (c !== null) options.push([c, fi, bi]);
+    }));
+    options.sort((a, b) => a[0] - b[0]);
+    const pairOf = new Map(), usedBacks = new Set();
+    for (const [, fi, bi] of options) {
+      if (!pairOf.has(fi) && !usedBacks.has(bi)) { pairOf.set(fi, bi); usedBacks.add(bi); }
+    }
+    // A back with no readable name, right after an unmatched front.
+    fronts.forEach((f, fi) => {
+      if (pairOf.has(fi)) return;
+      const next = ordered[ordered.indexOf(f) + 1];
+      if (next && next.side.side === "back" && !norm(next.side.player)) {
+        const bi = backs.indexOf(next);
+        if (!usedBacks.has(bi)) { pairOf.set(fi, bi); usedBacks.add(bi); }
+      }
+    });
+    const groups = [];
+    pairOf.forEach((bi, fi) => groups.push({ front: fronts[fi], back: backs[bi] }));
+    fronts.forEach((f, fi) => { if (!pairOf.has(fi)) groups.push({ front: f, back: null }); });
+    backs.forEach((b, bi) => { if (!usedBacks.has(bi)) groups.push({ front: null, back: b }); });
+    ordered.filter((p) => p.side.side === "unknown").forEach((p) => groups.push({ front: p, back: null }));
+    const first = (g) => Math.min(...[g.front, g.back].filter(Boolean).map((p) => p.order));
+    return groups.sort((a, b) => first(a) - first(b));
+  }
+  function merge(g) {
+    const f = g.front ? g.front.side : {}, b = g.back ? g.back.side : {};
+    const pick = (k, preferBack) => (preferBack ? (b[k] || f[k]) : (f[k] || b[k])) || "";
+    return {
+      player: pick("player"), team: pick("team"), year: pick("year", true),
+      manufacturer: pick("manufacturer", true), set_name: pick("set_name", true),
+      card_number: pick("card_number", true), parallel: pick("parallel"),
+      serial_number: pick("serial_number"), rookie: !!(f.rookie || b.rookie),
+      autographed: !!(f.autographed || b.autographed), graded: !!(f.graded || b.graded),
+      grader: pick("grader"), grade: pick("grade"), condition: f.condition || b.condition || ""
+    };
+  }
+
+  // ---------- Talking to Claude ----------
+  const READ_PROMPT = (n) => `You are cataloging sports trading cards from ${n} photos, numbered 1 to ${n} in the order given.
+Each photo shows ONE side of ONE card. Fronts and backs of the same card may both be in the set.
+For EACH photo, copy only what is printed on that side.
+Reply with only a JSON array of ${n} objects, one per photo, in order, each shaped like:
+{"photo":1,"side":"front"|"back"|"unknown","player":"","team":"","year":"","manufacturer":"","set_name":"","card_number":"","parallel":"","serial_number":"","rookie":false,"autographed":false,"graded":false,"grader":"","grade":"","condition":"near mint or better"|"excellent"|"very good"|"poor"|""}
+Rules: "front" is the player picture side. Use "" for anything not printed on that side.
+card_number has no "#". year is the season, like "2023" or "2023-24".
+Judge condition only from what the photo shows; use "" if you cannot tell.`;
+
+  const VALUE_PROMPT = (list) => `Estimate recent eBay SOLD prices in US dollars for these sports cards.
+Use your knowledge of typical recent sold prices for each exact card, parallel, and graded status.
+Ungraded cards are raw. Base cards of non-star players often sell for under $1.
+Be conservative. If you do not know the card well, give a wide range and "low" confidence.
+Cards:
+${list}
+Reply with only a JSON array, one object per card, in the same order:
+{"card":1,"title":"eBay title, at most 80 characters, facts from the card only","search":"short eBay search words for this exact card","low":0.5,"typical":1,"high":2,"confidence":"high"|"medium"|"low","note":"one short reason"}`;
+
+  function errorCopy(e) {
+    switch (e && e.code) {
+      case "not_granted": return "Claude was not allowed for this page. Allow it in the page's permissions to scan.";
+      case "rate_limited": return "Claude is busy or you reached a usage limit. Wait a minute, then tap Scan again.";
+      case "session_expired": return "Sign in to Claude again, then tap Scan.";
+      case "image_rejected": return "One photo could not be read. Remove it and try again.";
+      case "images_unavailable": return "This view cannot send photos to Claude. Open the page in the Claude app.";
+      case "invalid_json": return "Claude's answer came back in the wrong shape. Tap Scan to try again.";
+      case "refused": return "Claude declined these photos. Try different photos.";
+      case "cancelled": return "Scan stopped.";
+      default: return "Something went wrong talking to Claude. Tap Scan to try again.";
+    }
+  }
+
+  function setProgress(done, total, text) {
+    $("barFill").style.width = total ? Math.round((done / total) * 100) + "%" : "0";
+    if (text) setStatus(text);
+  }
+  function setStatus(text, isError) {
+    const el = $("scanStatus");
+    el.textContent = text; el.classList.toggle("error", !!isError);
+  }
+
+  async function scan() {
+    if (!sample || !photos.length || busy) return;
+    busy = true; ctl = new AbortController();
+    $("scanBtn").disabled = true; $("stopBtn").hidden = false;
+    const limits = await sample.limits().catch(() => null);
+    const per = Math.max(1, Math.min(limits && limits.images ? limits.images.maxCount : 1, 8));
+    const batches = [];
+    for (let i = 0; i < photos.length; i += per) batches.push(photos.slice(i, i + per));
+    const steps = batches.length + 1;
+    const read = [];
+    try {
+      for (let bi = 0; bi < batches.length; bi++) {
+        const batch = batches[bi];
+        setProgress(bi, steps, `Reading photos ${bi * per + 1}-${bi * per + batch.length} of ${photos.length}...`);
+        const out = await sample.json(READ_PROMPT(batch.length), {
+          images: batch.map((p) => p.blob), signal: ctl.signal, cache: false
+        });
+        const arr = Array.isArray(out) ? out : [];
+        batch.forEach((p, i) => {
+          const s = arr.find((o) => Number(o && o.photo) === i + 1) || arr[i] || {};
+          read.push({ ...p, side: { ...s, side: ["front", "back"].includes(s.side) ? s.side : "unknown" } });
+        });
+      }
+      const groups = groupPhotos(read);
+      const merged = groups.map(merge);
+      setProgress(batches.length, steps, `Grouped into ${groups.length} cards. Estimating values...`);
+      const list = merged.map((m, i) => `${i + 1}. ${describe(m)}`).join("\n");
+      const vals = await sample.json(VALUE_PROMPT(list), { signal: ctl.signal, cache: false });
+      const arr = Array.isArray(vals) ? vals : [];
+      const fresh = groups.map((g, i) => {
+        const m = merged[i];
+        const v = arr.find((o) => Number(o && o.card) === i + 1) || arr[i] || {};
+        return {
+          id: "c" + Date.now().toString(36) + i,
+          frontThumb: g.front ? g.front.thumb : "", backThumb: g.back ? g.back.thumb : "",
+          title: String(v.title || describe(m)).slice(0, 80),
+          chips: chipsFor(m), low: num(v.low), typical: num(v.typical), high: num(v.high),
+          confidence: ["high", "medium", "low"].includes(v.confidence) ? v.confidence : "low",
+          note: String(v.note || ""), search: String(v.search || describe(m)), lastSale: "",
+          details: m
+        };
+      });
+      cards = cards.filter((c) => !c.example).concat(fresh);
+      photos = []; renderPhotos(0);
+      setProgress(steps, steps, `Done. ${fresh.length} cards added. Tap "Sold on eBay" to check real prices.`);
+      save(); render();
+    } catch (e) {
+      setStatus(errorCopy(e), e && e.code !== "cancelled");
+      setProgress(0, 0);
+    } finally {
+      busy = false; ctl = null; $("stopBtn").hidden = true; renderPhotos(0);
+    }
+  }
+  const num = (x) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : 0; };
+  function describe(m) {
+    return [m.year, m.manufacturer, m.set_name, m.card_number && "#" + m.card_number, m.player,
+      m.parallel, m.serial_number && "/" + String(m.serial_number).split("/").pop(),
+      m.rookie && "Rookie", m.autographed && "Auto",
+      m.graded ? [m.grader, m.grade].filter(Boolean).join(" ") || "Graded" : "raw"]
+      .filter(Boolean).join(" ");
+  }
+  function chipsFor(m) {
+    const c = [];
+    if (m.rookie) c.push("Rookie");
+    if (m.parallel) c.push(m.parallel);
+    if (m.serial_number) c.push(m.serial_number);
+    if (m.autographed) c.push("Auto");
+    c.push(m.graded ? ([m.grader, m.grade].filter(Boolean).join(" ") || "Graded") : "Ungraded");
+    if (m.condition) c.push(m.condition.replace(/\b\w/g, (x) => x.toUpperCase()));
+    return c;
+  }
+
+  // ---------- Money ----------
+  function valueOf(c) {
+    const entered = parseFloat(c.lastSale);
+    return Number.isFinite(entered) && entered >= 0 ? entered : num(c.typical);
+  }
+  function cashOf(c) {
+    const v = valueOf(c), rate = Math.min(100, Math.max(0, parseFloat($("rateInput").value) || 0)) / 100;
+    return v < BULK_UNDER ? BULK_CASH : Math.round(v * rate * 100) / 100;
+  }
+  function soldUrl(c) {
+    return "https://www.ebay.com/sch/i.html?_nkw=" + encodeURIComponent(c.search || c.title)
+      + "&LH_Sold=1&LH_Complete=1&_sacat=261328";
+  }
+
+  // ---------- Render ----------
+  function render() {
+    const list = $("cards");
+    list.textContent = "";
+    const shown = cards.length ? cards : [EXAMPLE];
+    for (const c of shown) list.append(cardEl(c));
+    renderTotals();
+    const real = cards.filter((c) => !c.example).length;
+    $("exportBtn").hidden = !real; $("clearAll").hidden = !real;
+  }
+  function renderTotals() {
+    const real = cards.filter((c) => !c.example);
+    $("tCards").textContent = real.length;
+    $("tValue").textContent = money(real.reduce((s, c) => s + valueOf(c), 0));
+    $("tCash").textContent = money(real.reduce((s, c) => s + cashOf(c), 0));
+    $("tEntered").textContent = real.filter((c) => c.lastSale !== "" && Number.isFinite(parseFloat(c.lastSale))).length;
+  }
+  function pic(src, alt) {
+    if (src) { const i = document.createElement("img"); i.src = src; i.alt = alt; return i; }
+    const d = document.createElement("div"); d.className = "blank"; d.textContent = "No " + alt.split(" ")[0].toLowerCase(); return d;
+  }
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function cardEl(c) {
+    const box = el("article", "card" + (c.example ? " example" : ""));
+    const pics = el("div", "pics");
+    pics.append(pic(c.frontThumb, "Front photo"), pic(c.backThumb, "Back photo"));
+    const info = el("div", "info");
+    info.append(el("div", "title", c.title));
+    const chips = el("div", "chips");
+    if (c.example) chips.append(el("span", "chip tag-example", "Example"));
+    for (const t of c.chips || []) chips.append(el("span", "chip", t));
+    chips.append(el("span", "chip " + c.confidence, c.confidence + " confidence"));
+    info.append(chips);
+    box.append(pics, info);
+
+    const values = el("div", "values");
+    const ai = el("div", "v");
+    ai.append(el("small", "", "AI value"), el("b", "", money(c.typical)));
+    ai.append(el("small", "", money(c.low) + " to " + money(c.high)));
+    const sale = el("div", "v");
+    const inputId = "sale-" + c.id;
+    const lab = el("small", "", "Last sale");
+    const lbl = document.createElement("label"); lbl.htmlFor = inputId; lbl.append(lab);
+    const input = document.createElement("input");
+    input.type = "number"; input.id = inputId; input.min = "0"; input.step = "0.01";
+    input.inputMode = "decimal"; input.placeholder = "$"; input.value = c.lastSale || "";
+    input.disabled = !!c.example;
+    const cashB = el("b", "", money(cashOf(c)));
+    input.addEventListener("input", () => {
+      c.lastSale = input.value; cashB.textContent = money(cashOf(c)); renderTotals(); save();
+    });
+    sale.append(lbl, input);
+    const cash = el("div", "v cash");
+    cash.append(el("small", "", "Store cash"), cashB);
+    values.append(ai, sale, cash);
+    box.append(values);
+
+    const links = el("div", "links");
+    const a = document.createElement("a");
+    a.href = soldUrl(c); a.target = "_blank"; a.rel = "noopener"; a.textContent = "Sold on eBay ↗";
+    links.append(a);
+    if (!c.example) {
+      const rm = el("button", "", "Remove");
+      rm.type = "button";
+      rm.addEventListener("click", () => { cards = cards.filter((x) => x !== c); save(); render(); });
+      links.append(rm);
+    }
+    box.append(links);
+    if (c.note) box.append(el("div", "note", c.note));
+    return box;
+  }
+
+  // ---------- Export ----------
+  function csv() {
+    const cols = ["title", "player", "year", "manufacturer", "set_name", "card_number", "parallel",
+      "serial_number", "rookie", "autographed", "graded", "condition", "ai_low", "ai_typical", "ai_high",
+      "confidence", "last_sale", "store_cash", "sold_link"];
+    const q = (v) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+    const rows = cards.filter((c) => !c.example).map((c) => {
+      const d = c.details || {};
+      return [c.title, d.player, d.year, d.manufacturer, d.set_name, d.card_number, d.parallel,
+        d.serial_number, d.rookie ? "yes" : "", d.autographed ? "yes" : "", d.graded ? "yes" : "",
+        d.condition, c.low, c.typical, c.high, c.confidence, c.lastSale, cashOf(c), soldUrl(c)].map(q).join(",");
+    });
+    return [cols.join(",")].concat(rows).join("\n");
+  }
+
+  // ---------- Wire up ----------
+  let clearArmed = false;
+  $("photoInput").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+  $("clearPhotos").addEventListener("click", () => { photos = []; renderPhotos(0); });
+  $("scanBtn").addEventListener("click", scan);
+  $("stopBtn").addEventListener("click", () => { if (ctl) ctl.abort(); });
+  $("rateInput").addEventListener("input", () => { render(); save(); });
+  $("clearAll").addEventListener("click", () => {
+    if (!clearArmed) {
+      clearArmed = true; $("clearAll").textContent = "Tap again to clear all cards";
+      setTimeout(() => { clearArmed = false; $("clearAll").textContent = "Clear results"; }, 4000);
+      return;
+    }
+    clearArmed = false; $("clearAll").textContent = "Clear results";
+    cards = []; save(); render();
+  });
+
+  load();
+  render();
+  renderPhotos(0);
+
+  if (window.claude && window.claude.use) {
+    window.claude.use("downloads").then((dl) => {
+      if (!dl) { $("exportBtn").remove(); return; }
+      $("exportBtn").addEventListener("click", async () => {
+        try {
+          await dl.save({ filename: "card-values.csv", data: csv() });
+          $("exportStatus").textContent = "Saved card-values.csv.";
+        } catch (e) { $("exportStatus").textContent = "The file was not saved."; }
+      });
+    });
+    window.claude.use("sample").then(async (s) => {
+      if (!s) { $("noClaude").hidden = false; return; }
+      const lim = await s.limits().catch(() => null);
+      if (!lim || !lim.images) { $("noClaude").hidden = false; $("noClaude").textContent = "This view cannot send photos to Claude. Open the page in the Claude app or on claude.ai."; return; }
+      sample = s;
+      renderPhotos(0);
+    });
+  } else {
+    $("noClaude").hidden = false;
+  }
+})();
+</script>
